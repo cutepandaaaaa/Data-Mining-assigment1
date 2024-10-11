@@ -1,2 +1,1 @@
-Evaluating Classification Models: Decision Trees 
-vs. Neural Networks on Income Prediction
+This repository contains the implementation of two machine learning models: a Neural Network and a Decision Tree. Both models are built and trained on the same dataset, allowing for a detailed comparison of their performance across various evaluation metrics, including accuracy, precision, recall, F1-score, and training time.
