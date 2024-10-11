@@ -1,2 +1,2 @@
-# Data-Mining-assigment1
- compare two existing implementations of classifiers. 
+Evaluating Classification Models: Decision Trees 
+vs. Neural Networks on Income Prediction
