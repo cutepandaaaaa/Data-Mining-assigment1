@@ -1,0 +1,181 @@
+import pandas as pd
+import time
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+# Read the dataset
+column_names = ['age', 'workclass', 'fnlwgt', 'education', 'education-num',
+                'marital-status', 'occupation', 'relationship', 'race', 'sex',
+                'capital-gain', 'capital-loss', 'hours-per-week', 'native-country', 'income']
+
+# Training dataset
+train_data = pd.read_csv('adult.data', names=column_names, na_values=' ?')
+train_data = train_data.dropna()
+
+# Testing dataset
+test_data = pd.read_csv('adult.test', names=column_names, na_values=' ?', skiprows=1)
+test_data = test_data.dropna()
+
+# Binarize the income column (' <=50K' -> 0, ' >50K' -> 1)
+train_data['income'] = train_data['income'].apply(lambda x: 1 if x == ' >50K' else 0)
+test_data['income'] = test_data['income'].apply(lambda x: 1 if x == ' >50K.' else 0)
+
+# Separate features and labels
+X_train = train_data.drop('income', axis=1)
+y_train = train_data['income']
+X_test = test_data.drop('income', axis=1)
+y_test = test_data['income']
+
+# One-hot encode categorical features
+X_train = pd.get_dummies(X_train)
+X_test = pd.get_dummies(X_test)
+
+# Ensure training and testing sets have the same feature columns
+X_train, X_test = X_train.align(X_test, join='left', axis=1, fill_value=0)
+
+# Define the decision tree classifier
+dt = DecisionTreeClassifier(random_state=42)
+
+param_grid = {
+    'max_depth': [None, 5, 10, 15, 20],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'max_features': [None, 'sqrt', 'log2']  # Removed 'auto'
+}
+
+# Start timing
+start_time = time.time()
+
+# Use GridSearchCV for hyperparameter tuning
+grid_search = GridSearchCV(estimator=dt, param_grid=param_grid,
+                           scoring='accuracy', cv=5, verbose=1, n_jobs=-1)
+grid_search.fit(X_train, y_train)
+
+# Record training time
+training_time = time.time() - start_time
+
+# Get the best parameters
+best_dt = grid_search.best_estimator_
+print(f"Best parameters: {grid_search.best_params_}")
+
+# Make predictions
+y_pred = best_dt.predict(X_test)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+report = classification_report(y_test, y_pred, output_dict=True)  # Modified to output a dictionary
+
+# Extract precision, recall, and F1 score
+precision = report['1']['precision']
+recall = report['1']['recall']
+f1_score = report['1']['f1-score']
+
+# Create a performance metrics table
+performance_metrics = pd.DataFrame({
+    'Metric': ['Training Time (s)', 'Accuracy', 'Precision', 'Recall', 'F1 Score'],
+    'Value': [training_time, accuracy, precision, recall, f1_score]
+})
+
+# Print the table
+print(performance_metrics)
+print(f"Accuracy: {accuracy:.2f}")
+print("Classification Report:")
+print(report)
+
+import numpy as np
+from sklearn.metrics import confusion_matrix
+
+# Calculate the confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+print("Confusion Matrix:\n", conf_matrix)
+
+# Calculate Gini index
+def gini_index(y):
+    classes, counts = np.unique(y, return_counts=True)
+    probabilities = counts / counts.sum()
+    gini = 1 - sum(probabilities ** 2)
+    return gini
+
+# Calculate Gini index
+gini = gini_index(y_test)
+print(f"Gini Index: {gini:.4f}")
+
+# Calculate entropy
+def entropy(y):
+    classes, counts = np.unique(y, return_counts=True)
+    probabilities = counts / counts.sum()
+    entropy = -sum(probabilities * np.log2(probabilities + 1e-10))  # Add a small value to avoid log(0)
+    return entropy
+
+# Calculate entropy
+entropy_value = entropy(y_test)
+print(f"Entropy: {entropy_value:.4f}")
+
+# Calculate misclassification rate
+def misclassification_error(y_true, y_pred):
+    return np.mean(y_true != y_pred)
+
+# Calculate misclassification rate
+error = misclassification_error(y_test, y_pred)
+print(f"Misclassification Error: {error:.4f}")
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import learning_curve
+
+def plot_learning_curve(model, X, y):
+    train_sizes, train_scores, test_scores = learning_curve(
+        model, X, y, n_jobs=-1, train_sizes=np.linspace(0.1, 1.0, 10), cv=5
+    )
+    
+    train_scores_mean = train_scores.mean(axis=1)
+    test_scores_mean = test_scores.mean(axis=1)
+
+    # Print training and validation scores
+    print("Training scores:", train_scores_mean)
+    print("Validation scores:", test_scores_mean)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_sizes, train_scores_mean, label='Training score', color='blue')
+    plt.plot(train_sizes, test_scores_mean, label='Validation score', color='green')
+    plt.title('Learning Curve')
+    plt.xlabel('Training Size')
+    plt.ylabel('Score')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+# Use the learning curve function
+plot_learning_curve(best_dt, X_train, y_train)
+
+from sklearn.model_selection import cross_val_score
+
+cv_scores = cross_val_score(best_dt, X_train, y_train, cv=5)
+print(f"Cross-Validation Scores: {cv_scores}")
+print(f"Mean CV Score: {cv_scores.mean():.2f} ± {cv_scores.std():.2f}")
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+conf_matrix = confusion_matrix(y_test, y_pred)
+ConfusionMatrixDisplay(confusion_matrix=conf_matrix).plot()
+plt.title('Confusion Matrix')
+plt.show()
+
+from sklearn.metrics import roc_curve, auc
+
+y_scores = best_dt.predict_proba(X_test)[:, 1]  
+fpr, tpr, thresholds = roc_curve(y_test, y_scores)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='blue', label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='red', linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc='lower right')
+plt.show()
+
