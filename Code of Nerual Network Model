@@ -1,4 +1,4 @@
-import time  # 导入时间模块
+import time  # Import the time module
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -9,12 +9,15 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix
 
 print("computing...")
-# 设置随机种子以确保可重复性
+# Set random seed for reproducibility
 torch.manual_seed(0)
 
-# 1. 数据加载
+# 1. Load Data
 column_names = [
     "age", "workclass", "fnlwgt", "education", "education_num", "marital_status",
     "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss",
@@ -23,29 +26,29 @@ column_names = [
 data = pd.read_csv('adult.data', header=None, names=column_names, na_values=' ?', skipinitialspace=True)
 test_data = pd.read_csv('adult.test', header=None, names=column_names, na_values=' ?', skipinitialspace=True, skiprows=1)
 
-# 2. 数据预处理
-# 去掉缺失值
+# 2. Data Preprocessing
+# Remove missing values
 data.dropna(inplace=True)
 test_data.dropna(inplace=True)
 
-# 处理目标变量
+# Process the target variable
 data['income'] = data['income'].map({'<=50K': 0, '>50K': 1})
 test_data['income'] = test_data['income'].map({'<=50K.': 0, '>50K.': 1})
 
-# 特征和标签
+# Features and labels
 X = data.drop('income', axis=1)
 y = data['income']
 
-# 对分类特征进行编码
+# Encode categorical features
 categorical_features = X.select_dtypes(include=['object']).columns.tolist()
 numeric_features = X.select_dtypes(exclude=['object']).columns.tolist()
 
-# 创建预处理管道
+# Create preprocessing pipeline
 preprocessor = ColumnTransformer(
     transformers=[
         ('num', Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='mean')),
-            ('scaler', StandardScaler())  # 添加标准化
+            ('scaler', StandardScaler())  # Add scaling
         ]), numeric_features),
         ('cat', OneHotEncoder(sparse_output=False), categorical_features)
     ])
@@ -53,78 +56,139 @@ preprocessor = ColumnTransformer(
 X_processed = preprocessor.fit_transform(X)
 y_processed = y.values
 
-# 3. 数据分割
+# 3. Split Data
 X_train, X_valid, y_train, y_valid = train_test_split(X_processed, y_processed, test_size=0.2, random_state=0)
 
-# 4. 创建数据加载器
-train_tensor = TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train))  # 使用 FloatTensor
+# 4. Create Data Loaders
+train_tensor = TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train))  # Use FloatTensor
 valid_tensor = TensorDataset(torch.FloatTensor(X_valid), torch.FloatTensor(y_valid))
 train_loader = DataLoader(train_tensor, batch_size=64, shuffle=True)
 valid_loader = DataLoader(valid_tensor, batch_size=64, shuffle=False)
 
-# 5. 定义神经网络
+# 5. Define Neural Network
 class NeuralNetwork(nn.Module):
     def __init__(self, input_size):
         super(NeuralNetwork, self).__init__()
-        self.fc1 = nn.Linear(input_size, 256)  # 增加节点数
+        self.fc1 = nn.Linear(input_size, 256)  # Increase number of nodes
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, 1)  # 输出层只有一个节点，因为这是二分类问题
+        self.fc4 = nn.Linear(64, 1)  # Output layer has only one node for binary classification
         self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)  # 添加 Dropout
+        self.dropout = nn.Dropout(0.5)  # Add Dropout
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.activation(x)
-        x = self.dropout(x)  # 添加 Dropout
+        x = self.dropout(x)  # Add Dropout
         x = self.fc2(x)
         x = self.activation(x)
-        x = self.dropout(x)  # 添加 Dropout
+        x = self.dropout(x)  # Add Dropout
         x = self.fc3(x)
         x = self.activation(x)
-        x = self.fc4(x)  # 不应用 Sigmoid，在计算损失时再使用
+        x = self.fc4(x)  # Do not apply Sigmoid, apply it during loss calculation
         return x
 
-# 6. 初始化模型、损失函数和优化器
+# 6. Initialize Model, Loss Function, and Optimizer
 model = NeuralNetwork(X_processed.shape[1])
-criterion = nn.BCEWithLogitsLoss()  # 使用 logits 作为损失函数
-optimizer = optim.Adam(model.parameters(), lr=0.0001)  # 减小学习率
+criterion = nn.BCEWithLogitsLoss()  # Use logits as loss function
+optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Reduce learning rate
 
-# 7. 训练模型
-num_epochs = 50  # 增加训练轮数
-start_time = time.time()  # 记录开始时间
+# 7. Train the Model
+num_epochs = 50  # Increase number of training epochs
+start_time = time.time()  # Record start time
+
+train_losses = []  # Record training losses
+val_losses = []  # Record validation losses
 
 for epoch in range(num_epochs):
     model.train()
+    epoch_loss = 0
     for inputs, labels in train_loader:
         optimizer.zero_grad()
-        outputs = model(inputs).squeeze()  # 输出的形状是 [batch_size]
-        loss = criterion(outputs, labels)  # 不需要 float()，因为已经是 FloatTensor
+        outputs = model(inputs).squeeze()  # Output shape is [batch_size]
+        loss = criterion(outputs, labels)  # No need for float(), already a FloatTensor
         loss.backward()
         optimizer.step()
+        epoch_loss += loss.item()
     
-    # 验证模型
+    # Validate the model
     model.eval()
     val_loss = 0
     with torch.no_grad():
         for inputs, labels in valid_loader:
             outputs = model(inputs).squeeze()
             val_loss += criterion(outputs, labels).item()
-    val_loss /= len(valid_loader)
-    print(f'Epoch {epoch + 1}/{num_epochs}, Validation Loss: {val_loss:.4f}')
+    
+    train_losses.append(epoch_loss / len(train_loader))  # Record average training loss
+    val_losses.append(val_loss / len(valid_loader))  # Record average validation loss
+    
+    print(f'Epoch {epoch + 1}/{num_epochs}, Training Loss: {train_losses[-1]:.4f}, Validation Loss: {val_losses[-1]:.4f}')
 
-end_time = time.time()  # 记录结束时间
-training_time = end_time - start_time  # 计算训练时间
-print(f'Training Time: {training_time:.2f} seconds')  # 打印训练时间
+end_time = time.time()  # Record end time
+training_time = end_time - start_time  # Calculate training time
+print(f'Training Time: {training_time:.2f} seconds')  # Print training time
 
-# 8. 测试模型
+# 8. Visualize Training and Validation Loss
+plt.figure(figsize=(10, 5))
+plt.plot(train_losses, label='Training Loss', color='blue')
+plt.plot(val_losses, label='Validation Loss', color='orange')
+plt.title('Training and Validation Loss Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid()
+plt.show()
+
+# 9. Test the Model
 test_processed = preprocessor.transform(test_data.drop('income', axis=1))
 test_tensor = torch.FloatTensor(test_processed)
 model.eval()
 with torch.no_grad():
     test_outputs = model(test_tensor).squeeze()
-    test_predictions = (torch.sigmoid(test_outputs) > 0.5).long()  # 在这里应用 Sigmoid
+    test_predictions = (torch.sigmoid(test_outputs) > 0.5).long()  # Apply Sigmoid here
 
-# 计算准确率
+# Calculate accuracy
 test_accuracy = (test_predictions.numpy() == test_data['income'].values).mean()
 print(f'Test Accuracy: {test_accuracy:.4f}')
+
+# 10. Visualize Confusion Matrix
+conf_matrix = confusion_matrix(test_data['income'].values, test_predictions.numpy())
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=['<=50K', '>50K'], yticklabels=['<=50K', '>50K'])
+plt.ylabel('Actual')
+plt.xlabel('Predicted')
+plt.title('Confusion Matrix')
+plt.show()
+
+# 11. Visualize Classification Report
+metrics = classification_report(test_data['income'].values, test_predictions.numpy(), output_dict=True)
+metrics_df = pd.DataFrame(metrics).transpose()
+
+plt.figure(figsize=(10, 6))
+sns.barplot(x=metrics_df.index[:-1], y=metrics_df['f1-score'][:-1], palette='viridis')
+plt.title('F1 Score for Each Class')
+plt.xlabel('Class')
+plt.ylabel('F1 Score')
+plt.ylim(0, 1)
+plt.show()
+
+# 1. Test the model
+# Ensure test_data is prepared and follows the same preprocessing steps as the training data
+test_processed = preprocessor.transform(test_data.drop('income', axis=1))
+test_tensor = torch.FloatTensor(test_processed)
+
+# 2. Use the model to make predictions
+model.eval()  # Set the model to evaluation mode
+with torch.no_grad():
+    test_outputs = model(test_tensor).squeeze()  # Get the outputs
+    test_predictions = (torch.sigmoid(test_outputs) > 0.5).long()  # Binary classification prediction
+
+# 3. Calculate accuracy
+test_accuracy = (test_predictions.numpy() == test_data['income'].values).mean()
+print(f'Test Accuracy: {test_accuracy:.4f}')
+
+# 4. Calculate other metrics (optional)
+from sklearn.metrics import classification_report
+print(classification_report(test_data['income'].values, test_predictions.numpy()))
